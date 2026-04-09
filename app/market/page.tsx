@@ -1,60 +1,84 @@
 "use client";
 import WalletBar from "@/components/WalletBar";
+import { Lock } from "lucide-react";
+import clsx from "clsx";
 
-const LISTINGS = [
-  { id:1, name:"Wolfsbane Axe",     type:"Weapon",    rarity:"Rare",    price:"2.4 CELO",  chain:"celo",    streak:14 },
-  { id:2, name:"Iron Parapet",      type:"Structure", rarity:"Common",  price:"0.8 CELO",  chain:"celo",    streak:5  },
-  { id:3, name:"Deep Well",         type:"Structure", rarity:"Uncommon",price:"3.2 XLM",   chain:"stellar", streak:10 },
-  { id:4, name:"Bone Shield",       type:"Armor",     rarity:"Rare",    price:"1.5 XLM",   chain:"stellar", streak:7  },
-  { id:5, name:"Blood Banner",      type:"Cosmetic",  rarity:"Epic",    price:"5.0 CELO",  chain:"both",    streak:21 },
-  { id:6, name:"Ember Torch",       type:"Cosmetic",  rarity:"Common",  price:"0.3 XLM",   chain:"stellar", streak:3  },
+const ITEMS = [
+  { id:1, name:"Iron Crest",       type:"Cosmetic", rarity:"Common",   streak:7,   price:"0.8 CELO",  emoji:"🛡", chain:"celo"    },
+  { id:2, name:"Deep Well",        type:"Structure",rarity:"Uncommon", streak:10,  price:"3.2 XLM",   emoji:"💧", chain:"stellar" },
+  { id:3, name:"Wolfsbane Axe",    type:"Weapon",   rarity:"Rare",     streak:14,  price:"2.4 CELO",  emoji:"⚔️", chain:"celo"    },
+  { id:4, name:"Blood Banner",     type:"Cosmetic", rarity:"Epic",     streak:21,  price:"5.0 CELO",  emoji:"🚩", chain:"both"    },
+  { id:5, name:"Bone Parapet",     type:"Structure",rarity:"Common",   streak:5,   price:"0.6 XLM",   emoji:"🧱", chain:"stellar" },
+  { id:6, name:"Ember Torch",      type:"Cosmetic", rarity:"Common",   streak:3,   price:"0.3 XLM",   emoji:"🔥", chain:"stellar" },
+  { id:7, name:"Soroban Relic",    type:"Artifact", rarity:"Legendary",streak:60,  price:"12.0 XLM",  emoji:"💎", chain:"stellar" },
+  { id:8, name:"Raid Trophy",      type:"Artifact", rarity:"Rare",     streak:20,  price:"3.5 CELO",  emoji:"🏆", chain:"celo"    },
 ];
 
-const RARITY_COLORS: Record<string,string> = {
-  Common:"text-bone-400 bg-ash-700/40",
-  Uncommon:"text-moss-400 bg-moss-900/20",
-  Rare:"text-blue-400 bg-blue-900/20",
-  Epic:"text-ember-400 bg-ember-900/20",
+const RARITY: Record<string,{ bg:string; text:string }> = {
+  Common:    { bg:"rgba(255,255,255,0.06)",   text:"rgba(255,255,255,0.5)" },
+  Uncommon:  { bg:"rgba(0,204,102,0.1)",      text:"var(--green)" },
+  Rare:      { bg:"rgba(51,153,255,0.1)",     text:"var(--blue)" },
+  Epic:      { bg:"rgba(255,51,51,0.1)",      text:"var(--red)" },
+  Legendary: { bg:"rgba(255,184,0,0.15)",     text:"var(--gold)" },
 };
+
+const userStreak = 7;
 
 export default function MarketPage() {
   return (
-    <div className="min-h-screen bg-ash-950 noise">
+    <div className="min-h-screen">
       <WalletBar />
       <div className="max-w-5xl mx-auto px-4 pt-24 pb-16">
-        <p className="font-mono text-xs text-ember-600 tracking-widest uppercase mb-2">On-chain loot</p>
-        <h1 className="font-display text-4xl text-bone-200 mb-2">Spoils of War</h1>
-        <p className="text-sm text-bone-500 mb-8">Items earned through streaks, raids, and survival. All tradeable on-chain.</p>
+        <div className="mb-10">
+          <div className="text-xs font-mono text-white/30 tracking-widest uppercase mb-3">Loot &amp; spoils</div>
+          <h1 className="font-display font-800 text-4xl text-white mb-2">Market</h1>
+          <p className="text-white/40">Items earned through streaks and raids. Streak-gated — the longer you survive, the more you can buy.</p>
+        </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {LISTINGS.map(item => (
-            <div key={item.id}
-              className="bg-ash-800/60 rounded-lg border border-ash-600/30 p-5 hover:border-ember-800/40 transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <div className="w-12 h-12 rounded border border-ash-600/30 bg-ash-700/50 flex items-center justify-center text-xl">
-                  {item.type === "Weapon" ? "⚔" : item.type === "Structure" ? "🏰" : item.type === "Armor" ? "🛡" : "🔥"}
+        <div className="flex items-center gap-3 mb-6 p-3 rounded-lg" style={{ background: "rgba(255,184,0,0.08)", border: "1px solid rgba(255,184,0,0.2)" }}>
+          <span className="fire-flicker">🔥</span>
+          <span className="text-sm text-white/70">Your streak: <span className="font-semibold text-white">7 days</span> — {ITEMS.filter(i => i.streak <= userStreak).length} items unlocked</span>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {ITEMS.map(item => {
+            const r = RARITY[item.rarity];
+            const locked = item.streak > userStreak;
+            return (
+              <div key={item.id}
+                className={clsx("card p-5 transition-all", !locked && "hover:border-white/20", locked && "opacity-60")}>
+                <div className="flex items-start justify-between mb-3">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                    style={{ background: r.bg }}>
+                    {locked ? "🔒" : item.emoji}
+                  </div>
+                  <span className="badge text-xs" style={{ background: r.bg, color: r.text }}>{item.rarity}</span>
                 </div>
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${RARITY_COLORS[item.rarity]}`}>
-                  {item.rarity}
-                </span>
+                <h3 className="font-semibold text-white mb-0.5">{item.name}</h3>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs text-white/30">{item.type}</span>
+                  <span className="text-white/20">·</span>
+                  <span className="text-xs" style={{ color: item.chain === "celo" ? "var(--green)" : item.chain === "stellar" ? "var(--blue)" : "var(--gold)" }}>
+                    {item.chain === "both" ? "all chains" : item.chain}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 mb-3 p-2 rounded-lg" style={{ background: "var(--surface2)" }}>
+                  <span className="fire-flicker text-xs">🔥</span>
+                  <span className="text-xs font-mono text-white/50">Requires</span>
+                  <span className="text-xs font-mono font-600" style={{ color: locked ? "var(--red)" : "var(--gold)" }}>{item.streak} day streak</span>
+                  {locked && <Lock className="w-3 h-3 text-red-400 ml-auto" />}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-600 text-sm text-white">{item.price}</span>
+                  <button
+                    disabled={locked}
+                    className={clsx("btn text-xs py-1.5 px-3", locked ? "btn-secondary opacity-40 cursor-not-allowed" : "btn-primary")}>
+                    {locked ? `${item.streak - userStreak}d away` : "Buy"}
+                  </button>
+                </div>
               </div>
-              <h3 className="font-body text-sm text-bone-200 mb-1">{item.name}</h3>
-              <p className="text-[11px] font-mono text-bone-500 mb-3">{item.type} · {item.chain === "both" ? "All chains" : item.chain}</p>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-mono text-bone-500">Requires streak</div>
-                  <div className="text-xs font-mono text-ember-400">{item.streak}+ days</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] font-mono text-bone-500">Price</div>
-                  <div className="text-sm font-mono text-bone-200">{item.price}</div>
-                </div>
-              </div>
-              <button className="mt-4 w-full py-2 text-xs font-mono border border-ash-600/40 text-bone-400 rounded hover:border-ember-700/40 hover:text-ember-400 transition-all">
-                Buy →
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

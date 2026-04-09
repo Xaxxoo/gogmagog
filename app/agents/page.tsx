@@ -1,143 +1,153 @@
 "use client";
 import { useState } from "react";
 import WalletBar from "@/components/WalletBar";
-import AgentCard from "@/components/AgentCard";
-import type { AgentTier } from "@/components/AgentCard";
-import { Info } from "lucide-react";
+import { Shield, Zap, Hammer, Eye, Info, Check } from "lucide-react";
+import clsx from "clsx";
 
-const AGENTS: Array<{
-  name: string; tier: AgentTier; chains: any;
-  description: string; skills: string[];
-  dailyFee: string; currency: string;
-}> = [
+const AGENTS = [
   {
-    name: "Ember Scout",
-    tier: "scout",
-    chains: "both",
-    description: "A cautious agent that performs the minimum daily action to maintain your streak — tends base once per day and nothing more. Low cost, low risk.",
-    skills: ["tend_base", "streak_preserve", "celo_evm", "stellar_soroban"],
-    dailyFee: "0.01",
-    currency: "CELO / 0.5 XLM",
+    name: "Scout", tier: "scout", chains: "both",
+    price: "0.01 CELO / 0.5 XLM / day",
+    color: "rgba(255,255,255,0.6)",
+    colorVal: "#999",
+    description: "Performs one daily tend to keep your streak alive. Passive — no raiding.",
+    skills: ["tend_base", "streak_preserve"],
+    badge: null,
   },
   {
-    name: "Ironwall Warrior",
-    tier: "warrior",
-    chains: "celo",
-    description: "An aggressive Celo-native agent that tends base, actively raids weakened neighbors, and deposits loot back to your citadel. Best for competitive play.",
-    skills: ["tend_base", "raid_neighbors", "loot_deposit", "streak_preserve"],
-    dailyFee: "0.05",
-    currency: "CELO",
+    name: "Warrior", tier: "warrior", chains: "celo",
+    price: "0.05 CELO / day",
+    color: "var(--red)",
+    colorVal: "#FF3333",
+    description: "Tends base, raids weakened neighbors, deposits loot. Best for competitive play.",
+    skills: ["tend_base", "raid_neighbors", "loot_deposit"],
+    badge: "Popular",
   },
   {
-    name: "Soroban Builder",
-    tier: "builder",
-    chains: "stellar",
-    description: "A Stellar-native Soroban agent focused on construction. Prioritizes wall integrity and stockpiles — never attacks but keeps your base near full health.",
+    name: "Builder", tier: "builder", chains: "stellar",
+    price: "1.0 XLM / day",
+    color: "var(--green)",
+    colorVal: "#00CC66",
+    description: "Stellar-native. Focuses on wall reinforcement and stockpiling. Never attacks.",
     skills: ["reinforce_walls", "scavenge", "stockpile", "tend_base"],
-    dailyFee: "1.0",
-    currency: "XLM",
+    badge: null,
   },
   {
-    name: "Dual-chain Guardian",
-    tier: "guardian",
-    chains: "both",
-    description: "The most capable agent. Operates on both Celo and Stellar simultaneously — cross-chain resource arbitrage, elite defense, and streak maintenance regardless of network conditions.",
+    name: "Guardian", tier: "guardian", chains: "both",
+    price: "0.12 CELO + 2 XLM / day",
+    color: "var(--gold)",
+    colorVal: "#FFB800",
+    description: "Dual-chain elite agent. Cross-chain resource arbitrage, elite defense, streak maintenance on both networks.",
     skills: ["multi_chain", "tend_base", "reinforce_walls", "scavenge", "raid", "cross_chain_arb"],
-    dailyFee: "0.12",
-    currency: "CELO + 2 XLM",
+    badge: "Best",
   },
 ];
 
-export default function AgentsPage() {
-  const [activeAgent, setActiveAgent] = useState<string | null>(null);
-  const [chain, setChain] = useState<"celo"|"stellar"|"both">("both");
+const ICONS: any = { scout: Eye, warrior: Zap, builder: Hammer, guardian: Shield };
 
-  const filtered = chain === "both" ? AGENTS : AGENTS.filter(a => a.chains === chain || a.chains === "both");
+export default function AgentsPage() {
+  const [active, setActive] = useState<string | null>(null);
+  const [duration, setDuration] = useState("7");
 
   return (
-    <div className="min-h-screen bg-ash-950 noise">
+    <div className="min-h-screen">
       <WalletBar />
       <div className="max-w-5xl mx-auto px-4 pt-24 pb-16">
 
         <div className="mb-10">
-          <p className="font-mono text-xs text-ember-600 tracking-widest uppercase mb-2">Autonomous guardians</p>
-          <h1 className="font-display text-4xl text-bone-200 glow-ember mb-4">Agent Marketplace</h1>
-          <p className="text-sm text-bone-500 max-w-xl leading-relaxed">
-            Agents are on-chain smart accounts authorized to sign transactions on your behalf.
-            They maintain your streak and defend your citadel while you're offline — on Celo (EVM)
-            or Stellar (Soroban), or both.
-          </p>
+          <div className="text-xs font-mono text-white/30 tracking-widest uppercase mb-3">Autonomous guardians</div>
+          <h1 className="font-display font-800 text-4xl text-white mb-3">Hire an Agent</h1>
+          <p className="text-white/50 max-w-xl">Agents are on-chain accounts authorized to sign daily transactions for you. They maintain your streak and defend your citadel — without access to your funds.</p>
         </div>
 
-        {/* How agents work */}
-        <div className="mb-8 p-5 rounded-lg border border-ember-800/30 bg-ember-950/30 flex gap-3">
-          <Info className="w-4 h-4 text-ember-500 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-bone-500 leading-relaxed space-y-1">
-            <p><span className="text-bone-300">Celo agents</span> use a dedicated EOA or Safe sub-account with limited permissions — they can only call <code className="text-ember-400 bg-ash-700/50 px-1 rounded">tendBase()</code>, <code className="text-ember-400 bg-ash-700/50 px-1 rounded">scavenge()</code>, and <code className="text-ember-400 bg-ash-700/50 px-1 rounded">reinforceWalls()</code>. They cannot transfer your assets.</p>
-            <p><span className="text-bone-300">Stellar agents</span> use Soroban's contract-level auth — a separate keypair is authorized via <code className="text-ember-400 bg-ash-700/50 px-1 rounded">hire_agent()</code> and can only invoke whitelisted contract functions on your account.</p>
-            <p>You can dismiss an agent at any time by signing a <code className="text-ember-400 bg-ash-700/50 px-1 rounded">dismissAgent()</code> transaction.</p>
+        {/* How it works */}
+        <div className="card p-5 mb-8 flex gap-3">
+          <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-400" />
+          <div className="text-sm text-white/50 space-y-1">
+            <p><span className="text-white">Celo agents</span> use a scoped EOA — they can only call <code className="text-red-400 bg-white/5 px-1 rounded font-mono text-xs">tendBase()</code>, <code className="text-red-400 bg-white/5 px-1 rounded font-mono text-xs">scavenge()</code>, <code className="text-red-400 bg-white/5 px-1 rounded font-mono text-xs">reinforceWalls()</code>. Cannot touch your CELO.</p>
+            <p><span className="text-white">Stellar agents</span> use Soroban keypair auth — a separate key authorized via <code className="text-blue-400 bg-white/5 px-1 rounded font-mono text-xs">hire_agent()</code> for specific contract functions only.</p>
           </div>
         </div>
 
-        {/* Chain filter */}
-        <div className="flex gap-2 mb-6">
-          {(["both","celo","stellar"] as const).map(c => (
-            <button key={c} onClick={() => setChain(c)}
-              className={`px-4 py-1.5 text-xs font-mono rounded border transition-all ${
-                chain === c
-                  ? "border-ember-600/60 text-ember-400 bg-ember-900/20"
-                  : "border-ash-600/30 text-bone-500 hover:border-ash-500/50"
-              }`}>
-              {c === "both" ? "All chains" : c.charAt(0).toUpperCase() + c.slice(1)}
-            </button>
-          ))}
+        <div className="grid md:grid-cols-2 gap-4 mb-8">
+          {AGENTS.map(agent => {
+            const Icon = ICONS[agent.tier];
+            const isActive = active === agent.name;
+            return (
+              <div key={agent.name}
+                className={clsx("card p-6 cursor-pointer transition-all hover:border-white/20",
+                  isActive && "ring-1")}
+                style={isActive ? { ringColor: agent.colorVal, borderColor: `${agent.colorVal}50` } : {}}
+                onClick={() => setActive(isActive ? null : agent.name)}>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center"
+                      style={{ background: `${agent.colorVal}15`, border: `1px solid ${agent.colorVal}30` }}>
+                      <Icon className="w-5 h-5" style={{ color: agent.color }} />
+                    </div>
+                    <div>
+                      <div className="font-display font-700 text-white">{agent.name}</div>
+                      <div className="text-xs font-mono text-white/30">{agent.chains === "both" ? "Celo + Stellar" : agent.chains}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {agent.badge && (
+                      <span className="badge text-xs" style={{ background: `${agent.colorVal}20`, color: agent.color, border: `1px solid ${agent.colorVal}40` }}>
+                        {agent.badge}
+                      </span>
+                    )}
+                    {isActive && <Check className="w-4 h-4 text-green-400" />}
+                  </div>
+                </div>
+                <p className="text-sm text-white/50 mb-4">{agent.description}</p>
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {agent.skills.map(s => (
+                    <span key={s} className="text-xs font-mono px-2 py-0.5 rounded"
+                      style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)" }}>
+                      {s}
+                    </span>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-mono font-600 text-white">{agent.price}</span>
+                  <span className="text-xs text-white/30">per day</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-5">
-          {filtered.map(agent => (
-            <AgentCard
-              key={agent.name}
-              {...agent}
-              active={activeAgent === agent.name}
-              onHire={() => setActiveAgent(prev => prev === agent.name ? null : agent.name)}
-            />
-          ))}
-        </div>
-
-        {/* Active agent config */}
-        {activeAgent && (
-          <div className="mt-8 p-6 rounded-lg border border-ember-700/40 bg-ash-800/50">
-            <h3 className="font-display text-sm text-ember-400 mb-4">Configure: {activeAgent}</h3>
-            <div className="grid md:grid-cols-3 gap-4 mb-4">
+        {active && (
+          <div className="card p-6" style={{ borderColor: "rgba(255,184,0,0.3)" }}>
+            <h3 className="font-display font-700 text-lg text-white mb-5">Configure {active}</h3>
+            <div className="grid md:grid-cols-3 gap-4 mb-6">
               <div>
-                <label className="block font-mono text-[10px] text-bone-500 mb-2 uppercase">Duration</label>
-                <select className="w-full bg-ash-700/50 border border-ash-600/30 rounded px-3 py-2 text-sm font-mono text-bone-300 focus:outline-none focus:border-ember-700/50">
-                  <option>7 days</option>
-                  <option>14 days</option>
-                  <option>30 days</option>
-                  <option>Forever</option>
+                <label className="block text-xs font-mono text-white/30 uppercase tracking-wider mb-2">Duration</label>
+                <select value={duration} onChange={e => setDuration(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm font-mono text-white bg-transparent outline-none"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border-strong)" }}>
+                  <option value="7">7 days</option>
+                  <option value="14">14 days</option>
+                  <option value="30">30 days</option>
+                  <option value="9999">Indefinite</option>
                 </select>
               </div>
               <div>
-                <label className="block font-mono text-[10px] text-bone-500 mb-2 uppercase">Priority</label>
-                <select className="w-full bg-ash-700/50 border border-ash-600/30 rounded px-3 py-2 text-sm font-mono text-bone-300 focus:outline-none focus:border-ember-700/50">
-                  <option>Balanced</option>
-                  <option>Walls first</option>
-                  <option>Food first</option>
-                  <option>Water first</option>
+                <label className="block text-xs font-mono text-white/30 uppercase tracking-wider mb-2">Priority</label>
+                <select className="w-full rounded-lg px-3 py-2.5 text-sm font-mono text-white bg-transparent outline-none"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border-strong)" }}>
+                  <option>Balanced</option><option>Walls first</option><option>Food first</option><option>Water first</option>
                 </select>
               </div>
               <div>
-                <label className="block font-mono text-[10px] text-bone-500 mb-2 uppercase">Aggression</label>
-                <select className="w-full bg-ash-700/50 border border-ash-600/30 rounded px-3 py-2 text-sm font-mono text-bone-300 focus:outline-none focus:border-ember-700/50">
-                  <option>Passive (no raids)</option>
-                  <option>Defensive only</option>
-                  <option>Opportunistic</option>
-                  <option>Aggressive</option>
+                <label className="block text-xs font-mono text-white/30 uppercase tracking-wider mb-2">Aggression</label>
+                <select className="w-full rounded-lg px-3 py-2.5 text-sm font-mono text-white bg-transparent outline-none"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border-strong)" }}>
+                  <option>Passive</option><option>Defensive only</option><option>Opportunistic</option><option>Aggressive</option>
                 </select>
               </div>
             </div>
-            <button className="px-6 py-2.5 border border-ember-600/60 text-ember-400 font-mono text-sm rounded hover:bg-ember-900/20 transition-all">
+            <button className="btn btn-gold px-8 py-3">
               Deploy Agent — Sign Transaction
             </button>
           </div>
