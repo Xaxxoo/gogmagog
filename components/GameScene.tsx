@@ -1,7 +1,17 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel = 74 }) {
+export default function GameScene({
+  wallHealth = 19,
+  waterLevel = 38,
+  foodLevel  = 74,
+  lastAction = "",
+}: {
+  wallHealth?: number;
+  waterLevel?: number;
+  foodLevel?:  number;
+  lastAction?: string;
+}) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 600);
@@ -9,6 +19,17 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
   }, []);
 
   const legOffset = (tick % 2 === 0) ? 3 : -3;
+
+  // Enemies advance as walls crumble
+  const enemyAdvance =
+    wallHealth < 15 ? 180 :
+    wallHealth < 30 ? 110 :
+    wallHealth < 50 ? 55  : 0;
+
+  // Flash green briefly after tending
+  const isTending = lastAction === "tend";
+  // Pulse speed for fire — faster when more damaged
+  const fireSpeed = wallHealth < 30 ? 0.9 : 0.5;
 
   return (
     <div className="w-full relative" style={{ aspectRatio: "16/9", maxHeight: 540 }}>
@@ -234,7 +255,7 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
 
         {/* ── GOG RODENT HORDE — RIGHT FLANK ── */}
         {/* RODENT 1 — giant war-rat (closest) */}
-        <g transform={`translate(${790 + (tick%2===0?0:-2)}, 340)`}>
+        <g transform={`translate(${790 - enemyAdvance + (tick%2===0?0:-2)}, 340) scale(-1, 1)`}>
           <ellipse cx="0" cy="20" rx="14" ry="4" fill="#0a0805" opacity="0.5"/>
           {/* Haunched body */}
           <ellipse cx="0" cy="8" rx="22" ry="15" fill="#5c4030"/>
@@ -272,7 +293,7 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
         </g>
 
         {/* RODENT 2 — slightly behind, smaller */}
-        <g transform={`translate(${850 + (tick%2===0?-2:0)}, 360)`}>
+        <g transform={`translate(${850 - enemyAdvance + (tick%2===0?-2:0)}, 360) scale(-1, 1)`}>
           <ellipse cx="0" cy="17" rx="12" ry="3" fill="#0a0805" opacity="0.5"/>
           <ellipse cx="0" cy="6" rx="18" ry="12" fill="#4a3428"/>
           <ellipse cx="16" cy="1" rx="14" ry="11" fill="#5a4030"/>
@@ -297,7 +318,7 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
         </g>
 
         {/* RODENT 3 — leader, on crest of hill, bigger */}
-        <g transform={`translate(${888 + (tick%2===0?0:-1)}, 305)`}>
+        <g transform={`translate(${888 - enemyAdvance + (tick%2===0?0:-1)}, 305) scale(-1, 1)`}>
           <ellipse cx="0" cy="22" rx="16" ry="4" fill="#0a0805" opacity="0.4"/>
           <ellipse cx="0" cy="9" rx="26" ry="17" fill="#6a4838"/>
           <ellipse cx="22" cy="1" rx="19" ry="14" fill="#7a5848"/>
@@ -340,13 +361,13 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
           <path d="M-24,14 Q-48,26 -54,10 Q-58,-5 -44,-10 Q-36,-13 -32,-6" fill="none" stroke="#4a2c18" strokeWidth="5" strokeLinecap="round"/>
         </g>
 
-        {/* Attack path arrows */}
-        <line x1="784" y1="360" x2="700" y2="355" stroke="#e04040" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.7"/>
-        <polygon points="700,352 692,356 700,360" fill="#e04040" opacity="0.7"/>
+        {/* Attack path arrows — advance with enemies */}
+        <line x1={784 - enemyAdvance} y1="360" x2={700 - enemyAdvance} y2="355" stroke="#e04040" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.7"/>
+        <polygon points={`${700 - enemyAdvance},352 ${692 - enemyAdvance},356 ${700 - enemyAdvance},360`} fill="#e04040" opacity="0.7"/>
 
         {/* ── MAGOG HORDE — LEFT (BREACH) ─── */}
         {/* Small rodents swarming through breach */}
-        <g transform={`translate(${424 + (tick%2===0?1:-1)}, 200)`}>
+        <g transform={`translate(${424 + (tick%2===0?1:-1)}, 200) scale(-1, 1)`}>
           <ellipse cx="0" cy="13" rx="8" ry="2.5" fill="#0a0805" opacity="0.5"/>
           <ellipse cx="0" cy="5" rx="13" ry="10" fill="#503828"/>
           <ellipse cx="11" cy="0" rx="11" ry="9" fill="#604030"/>
@@ -365,7 +386,7 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
         </g>
 
         {/* Second breach rodent */}
-        <g transform={`translate(${455 + (tick%2===0?-1:1)}, 212)`}>
+        <g transform={`translate(${455 + (tick%2===0?-1:1)}, 212) scale(-1, 1)`}>
           <ellipse cx="0" cy="11" rx="7" ry="2" fill="#0a0805" opacity="0.4"/>
           <ellipse cx="0" cy="4" rx="11" ry="8" fill="#453020"/>
           <ellipse cx="9" cy="0" rx="9" ry="7" fill="#554030"/>
@@ -444,6 +465,27 @@ export default function GameScene({ wallHealth = 19, waterLevel = 38, foodLevel 
         {/* ── ACTION PROMPT — bottom center ── */}
         <rect x="350" y="510" width="260" height="24" rx="3" fill="#1c1708" stroke="#5a3c18" strokeWidth="0.5"/>
         <text x="480" y="526" textAnchor="middle" fill="#c87820" fontSize="9" fontFamily="'Share Tech Mono'" fontWeight="bold">[ E ] SIGN TX: TEND BASE</text>
+
+        {/* ── CRITICAL RED VIGNETTE (walls < 30) ── */}
+        {wallHealth < 30 && (
+          <rect
+            width="960" height="540"
+            fill="none"
+            stroke="#FF2020"
+            strokeWidth="40"
+            opacity={0.12 + (30 - wallHealth) * 0.004}
+            style={{ filter: "blur(20px)" }}
+          />
+        )}
+
+        {/* ── GREEN REPAIR FLASH (after tending) ── */}
+        {isTending && (
+          <rect
+            width="960" height="540"
+            fill="#00CC66"
+            opacity="0.06"
+          />
+        )}
 
         </g>
       </svg>
