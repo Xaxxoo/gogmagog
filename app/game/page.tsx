@@ -5,20 +5,39 @@ import GameScene from "@/components/GameScene";
 import { useWalletCtx } from "@/app/providers";
 import { useToast } from "@/app/providers";
 import {
-  IS_CONTRACT_DEPLOYED,
   getBaseState,
-  tendBase    as contractTend,
-  scavenge    as contractScavenge,
+  hasBase,
+  tendBase       as contractTend,
+  scavenge       as contractScavenge,
   reinforceWalls as contractReinforce,
   attackBase,
+  getAttackableTargets,
+  getRecentEvents,
+  initBase       as contractInitBase,
+  GOG_CONTRACT_CELO,
 } from "@/lib/contracts/celo";
 import {
+  getStellarBaseState,
+  stellarHasBase,
+  tendBaseSoroban,
+  scavengeSoroban,
+  reinforceWallsSoroban,
+  attackBaseSoroban,
+  getStellarAttackableTargets,
+  initBaseSoroban,
+  GOG_CONTRACT_STELLAR,
+} from "@/lib/contracts/stellar";
+import {
   Shield, Droplets, Wheat, Clock, Swords, Bot,
-  AlertTriangle, ChevronRight, Wallet, X, Target, Crosshair,
+  AlertTriangle, ChevronRight, Wallet, X, Crosshair, Loader2,
 } from "lucide-react";
 import clsx from "clsx";
 
-type Action = "tend" | "scavenge" | "reinforce" | "raid";
+type Action    = "tend" | "scavenge" | "reinforce" | "raid";
+type GameState = "disconnected" | "loading" | "no-base" | "playing";
+
+type RaidTarget = { address: string; walls: number };
+type LogEntry   = { type: string; text: string };
 
 /* ─── Milestone definitions ────────────────────────────────── */
 const MILESTONES = [
@@ -26,13 +45,6 @@ const MILESTONES = [
   { days: 14,  label: "Ember Blade",   icon: "⚔️", desc: "Raid damage +5 permanent" },
   { days: 30,  label: "Wall of Gog",   icon: "🏰", desc: "Title NFT minted to your wallet" },
   { days: 100, label: "Eternal Flame", icon: "🔥", desc: "Legendary status + rare NFT drop" },
-];
-
-/* ─── Mock raid targets ────────────────────────────────────── */
-const RAID_TARGETS = [
-  { name: "cryptoking",     addr: "0xDEAD000000000000000000000000000000001234" as `0x${string}`, walls: 28, chain: "celo",    reward: 32 },
-  { name: "scavenger_b0t",  addr: "0xCAFE000000000000000000000000000000005678" as `0x${string}`, walls: 21, chain: "stellar", reward: 18 },
-  { name: "anon7331",       addr: "0xBEEF000000000000000000000000000000009ABC" as `0x${string}`, walls: 15, chain: "celo",    reward: 44 },
 ];
 
 /* ─── useTweenedValue ──────────────────────────────────────── */
@@ -44,7 +56,7 @@ function useTweenedValue(target: number, duration = 700) {
     if (from === target) return;
     const start = performance.now();
     const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1);
+      const t    = Math.min((now - start) / duration, 1);
       const ease = 1 - Math.pow(1 - t, 3);
       setDisplay(Math.round(from + (target - from) * ease));
       if (t < 1) requestAnimationFrame(tick);
@@ -121,10 +133,7 @@ function MilestoneCelebration({
           {milestone.label}
         </h2>
         <p className="text-white/50 text-sm mb-8 leading-relaxed">{milestone.desc}</p>
-        <button
-          onClick={onClose}
-          className="btn btn-gold px-10 py-3.5 text-sm font-700 w-full"
-        >
+        <button onClick={onClose} className="btn btn-gold px-10 py-3.5 text-sm font-700 w-full">
           Claim Reward
         </button>
       </div>
@@ -134,21 +143,19 @@ function MilestoneCelebration({
 
 /* ─── Raid panel ───────────────────────────────────────────── */
 function RaidPanel({
-  streak,
-  onClose,
-  onRaid,
-  pending,
+  streak, targets, onClose, onRaid, pending,
 }: {
   streak:  number;
+  targets: RaidTarget[];
   onClose: () => void;
-  onRaid:  (target: typeof RAID_TARGETS[0]) => void;
+  onRaid:  (target: RaidTarget) => Promise<void>;
   pending: boolean;
 }) {
-  const damage = Math.min(5 + streak, 25);
+  const damage   = Math.min(5 + streak, 25);
   const [raiding, setRaiding] = useState<string | null>(null);
 
-  const handleRaid = async (t: typeof RAID_TARGETS[0]) => {
-    setRaiding(t.name);
+  const handleRaid = async (t: RaidTarget) => {
+    setRaiding(t.address);
     await onRaid(t);
     setRaiding(null);
   };
@@ -161,14 +168,9 @@ function RaidPanel({
     >
       <div
         className="modal-in w-full max-w-md rounded-2xl overflow-hidden"
-        style={{
-          background: "var(--surface)",
-          border:     "1px solid rgba(255,51,51,0.3)",
-          boxShadow:  "0 0 40px rgba(255,51,51,0.1)",
-        }}
+        style={{ background: "var(--surface)", border: "1px solid rgba(255,51,51,0.3)", boxShadow: "0 0 40px rgba(255,51,51,0.1)" }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div
           className="flex items-center justify-between px-5 py-4"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
@@ -190,22 +192,22 @@ function RaidPanel({
           </div>
         </div>
 
-        {/* Targets */}
         <div className="p-3 space-y-2">
-          {RAID_TARGETS.map(t => (
+          {targets.length === 0 && (
+            <div className="text-center py-8 text-white/30 text-sm font-mono">
+              No raidable targets right now
+            </div>
+          )}
+          {targets.map(t => (
             <div
-              key={t.name}
+              key={t.address}
               className="rounded-xl p-4 flex items-center justify-between gap-3"
               style={{ background: "var(--surface2)", border: "1px solid rgba(255,51,51,0.12)" }}
             >
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ background: t.chain === "celo" ? "var(--green)" : "var(--blue)" }}
-                  />
-                  <span className="font-semibold text-sm text-white">{t.name}</span>
-                  <span className="text-xs font-mono text-white/30">{t.chain}</span>
+                  <span className="w-2 h-2 rounded-full" style={{ background: "var(--green)" }} />
+                  <span className="font-mono text-xs text-white/60">{t.address.slice(0, 8)}…{t.address.slice(-6)}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
@@ -216,17 +218,10 @@ function RaidPanel({
                     <div className="bar-track">
                       <div
                         className="bar-fill"
-                        style={{
-                          width: `${t.walls}%`,
-                          background: "linear-gradient(90deg, #CC0000, #FF3333)",
-                          boxShadow:  "0 0 6px rgba(255,51,51,0.5)",
-                        }}
+                        style={{ width:`${t.walls}%`, background:"linear-gradient(90deg,#CC0000,#FF3333)", boxShadow:"0 0 6px rgba(255,51,51,0.5)" }}
                       />
                     </div>
                   </div>
-                  <span className="text-xs font-mono text-white/40 flex-shrink-0">
-                    +{t.reward} res
-                  </span>
                 </div>
               </div>
               <button
@@ -234,14 +229,14 @@ function RaidPanel({
                 disabled={pending || !!raiding}
                 className="btn text-xs py-2 px-4 flex-shrink-0"
                 style={{
-                  background:   "rgba(255,51,51,0.15)",
-                  border:       "1px solid rgba(255,51,51,0.35)",
-                  color:        "var(--red)",
-                  boxShadow:    "0 0 12px rgba(255,51,51,0.1)",
-                  opacity:      raiding && raiding !== t.name ? 0.4 : 1,
+                  background: "rgba(255,51,51,0.15)",
+                  border:     "1px solid rgba(255,51,51,0.35)",
+                  color:      "var(--red)",
+                  boxShadow:  "0 0 12px rgba(255,51,51,0.1)",
+                  opacity:    raiding && raiding !== t.address ? 0.4 : 1,
                 }}
               >
-                {raiding === t.name ? (
+                {raiding === t.address ? (
                   <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-full border-2 border-red-500/30 border-t-red-400 animate-spin" />
                     Raiding…
@@ -264,35 +259,29 @@ function RaidPanel({
 }
 
 /* ─── Resource Ring ────────────────────────────────────────── */
-function ResourceRing({
-  value, colorHex, label, icon: Icon,
-}: {
+function ResourceRing({ value, colorHex, label, icon: Icon }: {
   value: number; colorHex: string; label: string; icon: any;
 }) {
   const display = useTweenedValue(value);
   const r = 30, circ = 2 * Math.PI * r;
-  const offset  = circ - (display / 100) * circ;
-  const isLow   = value < 30;
-  const isCrit  = value < 15;
+  const offset = circ - (display / 100) * circ;
+  const isLow  = value < 30;
+  const isCrit = value < 15;
 
   return (
     <div
       className={clsx("card p-4 flex flex-col items-center gap-2 relative overflow-hidden", isLow && "danger-border")}
       style={!isLow ? { borderColor: `${colorHex}22` } : {}}
     >
-      <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at 50% 100%, ${colorHex}10 0%, transparent 70%)` }} />
-      {isCrit && <span className="animate-ping absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full inline-flex" style={{ background: "var(--red)", opacity: 0.75 }} />}
-
+      <div className="absolute inset-0 pointer-events-none" style={{ background:`radial-gradient(ellipse at 50% 100%, ${colorHex}10 0%, transparent 70%)` }} />
+      {isCrit && <span className="animate-ping absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full inline-flex" style={{ background:"var(--red)", opacity:0.75 }} />}
       <svg width="76" height="76" viewBox="0 0 76 76" className="relative">
         <circle cx="38" cy="38" r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="5" />
         <circle
-          cx="38" cy="38" r={r}
-          fill="none"
+          cx="38" cy="38" r={r} fill="none"
           stroke={isLow ? "var(--red)" : colorHex}
-          strokeWidth="5"
-          strokeLinecap="round"
-          strokeDasharray={circ}
-          strokeDashoffset={offset}
+          strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={offset}
           style={{
             transform: "rotate(-90deg)", transformOrigin: "center",
             transition: "stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.4s",
@@ -300,12 +289,10 @@ function ResourceRing({
           }}
         />
         <text x="38" y="43" textAnchor="middle" fontSize="15" fontWeight="700"
-          fontFamily="JetBrains Mono, monospace"
-          fill={isLow ? "#FF3333" : "white"}>
+          fontFamily="JetBrains Mono, monospace" fill={isLow ? "#FF3333" : "white"}>
           {display}
         </text>
       </svg>
-
       <div className="flex items-center gap-1.5 relative">
         <Icon className="w-3 h-3" style={{ color: isLow ? "var(--red)" : colorHex }} />
         <span className="text-xs font-medium text-white/50">{label}</span>
@@ -315,17 +302,30 @@ function ResourceRing({
 }
 
 /* ─── Decay Timer ───────────────────────────────────────────── */
-function DecayTimer({ onNotify }: { onNotify: () => void }) {
-  const [secs, setSecs] = useState(6 * 3600 + 23 * 60 + 11);
+function DecayTimer({
+  lastActionTimestamp,
+  onNotify,
+}: {
+  lastActionTimestamp: number | null;
+  onNotify: () => void;
+}) {
+  const [secs, setSecs] = useState(0);
   const notified = useRef(false);
 
   useEffect(() => {
-    const id = setInterval(() => setSecs(s => s > 0 ? s - 1 : 86400), 1000);
+    if (!lastActionTimestamp) { setSecs(0); return; }
+    const compute = () => {
+      const nextDecay = lastActionTimestamp * 1_000 + 86_400_000;
+      return Math.max(0, Math.floor((nextDecay - Date.now()) / 1_000));
+    };
+    setSecs(compute());
+    notified.current = false;
+    const id = setInterval(() => setSecs(compute()), 1_000);
     return () => clearInterval(id);
-  }, []);
+  }, [lastActionTimestamp]);
 
   useEffect(() => {
-    if (secs === 3599 && !notified.current) {
+    if (secs > 0 && secs <= 3600 && !notified.current) {
       notified.current = true;
       onNotify();
     }
@@ -334,8 +334,8 @@ function DecayTimer({ onNotify }: { onNotify: () => void }) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
-  const pct = (secs / 86400) * 100;
-  const isUrgent = secs < 3600;
+  const pct      = lastActionTimestamp ? (secs / 86400) * 100 : 0;
+  const isUrgent = lastActionTimestamp ? secs < 3600 : false;
   const p2 = (n: number) => String(n).padStart(2, "0");
 
   return (
@@ -357,12 +357,14 @@ function DecayTimer({ onNotify }: { onNotify: () => void }) {
             </span>
           )}
         </div>
-        <div className="font-mono font-700 text-3xl mb-4 tabular-nums tracking-wider"
+        <div
+          className="font-mono font-700 text-3xl mb-4 tabular-nums tracking-wider"
           style={{
-            color: isUrgent ? "var(--red)" : "white",
+            color: !lastActionTimestamp ? "rgba(255,255,255,0.2)" : isUrgent ? "var(--red)" : "white",
             textShadow: isUrgent ? "0 0 20px rgba(255,51,51,0.4)" : "0 0 20px rgba(255,255,255,0.1)",
-          }}>
-          {p2(h)}:{p2(m)}:{p2(s)}
+          }}
+        >
+          {lastActionTimestamp ? `${p2(h)}:${p2(m)}:${p2(s)}` : "--:--:--"}
         </div>
         <div className="bar-track mb-2">
           <div className="bar-fill" style={{
@@ -378,7 +380,7 @@ function DecayTimer({ onNotify }: { onNotify: () => void }) {
 }
 
 /* ─── Log Entry ─────────────────────────────────────────────── */
-function LogEntry({ type, text }: { type: string; text: string }) {
+function LogItem({ type, text }: { type: string; text: string }) {
   const s = {
     danger:  { color:"#FF6666", border:"#FF3333", bg:"rgba(255,51,51,0.05)" },
     success: { color:"#44DD88", border:"#00CC66", bg:"rgba(0,204,102,0.05)" },
@@ -388,7 +390,7 @@ function LogEntry({ type, text }: { type: string; text: string }) {
 
   return (
     <div className="rounded-lg px-3 py-2 text-xs font-mono border-l-2 leading-relaxed animate-fade-in"
-      style={{ color: s.color, borderColor: s.border, background: s.bg }}>
+      style={{ color:s.color, borderColor:s.border, background:s.bg }}>
       {text}
     </div>
   );
@@ -401,41 +403,97 @@ export default function GamePage() {
   const { address, chain, connectCelo, connectStellar } = useWalletCtx();
   const { toast } = useToast();
 
-  // Game state
-  const [walls,  setWalls]  = useState(19);
-  const [water,  setWater]  = useState(38);
-  const [food,   setFood]   = useState(74);
-  const [streak, setStreak] = useState(7);
-  const [xp,     setXp]     = useState(340);
+  // Game state machine
+  const [gameState,           setGameState]           = useState<GameState>("disconnected");
+  const [chainError,          setChainError]          = useState<string | null>(null);
+
+  // Resources
+  const [walls,  setWalls]  = useState(0);
+  const [water,  setWater]  = useState(0);
+  const [food,   setFood]   = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [xp,     setXp]     = useState(0);
+
+  // Timers / targets / log
+  const [lastActionTimestamp, setLastActionTimestamp] = useState<number | null>(null);
+  const [raidTargets,         setRaidTargets]         = useState<RaidTarget[]>([]);
+  const [log,                 setLog]                 = useState<LogEntry[]>([]);
 
   // UI state
   const [pending,     setPending]     = useState<Action | null>(null);
+  const [initPending, setInitPending] = useState(false);
   const [lastAction,  setLastAction]  = useState("");
   const [showRaid,    setShowRaid]    = useState(false);
   const [celebration, setCelebration] = useState<typeof MILESTONES[0] | null>(null);
   const [confetti,    setConfetti]    = useState(false);
   const prevStreak = useRef(streak);
 
-  const [log, setLog] = useState([
-    { type: "danger",  text: "Wall integrity critical — scavenger breach detected" },
-    { type: "neutral", text: "Decay event: all resources −8%  ·  Block 21,049,190" },
-    { type: "success", text: "Base tended by vitalik.eth  ·  Streak: 7  ·  Block 21,049,181" },
-    { type: "agent",   text: "🤖 Ironwall Agent tended base on your behalf  ·  Block 21,049,170" },
-    { type: "neutral", text: "Decay event: all resources −8%  ·  Block 21,049,160" },
-  ]);
-
   const addLog = useCallback((type: string, text: string) => {
-    setLog(prev => [{ type, text: `${text}  ·  Block ${21_049_200 + prev.length}` }, ...prev].slice(0, 12));
+    setLog(prev => [{ type, text }, ...prev].slice(0, 12));
   }, []);
 
-  // ── Load real state from contract when wallet connects ──────
-  useEffect(() => {
-    if (!address || !IS_CONTRACT_DEPLOYED || chain !== "celo") return;
-    getBaseState(address as `0x${string}`).then(s => {
-      setWalls(s.walls); setWater(s.water);
-      setFood(s.food);   setStreak(s.streak);
-    }).catch(console.error);
+  // ── Refresh all chain state ─────────────────────────────────
+  const refreshState = useCallback(async () => {
+    if (!address) { setGameState("disconnected"); return; }
+
+    setGameState("loading");
+    setChainError(null);
+
+    try {
+      if (chain === "celo") {
+        if (!GOG_CONTRACT_CELO || GOG_CONTRACT_CELO === "0x") {
+          setChainError("Celo contract not deployed. Set NEXT_PUBLIC_GOG_CONTRACT_CELO in .env.local");
+          setGameState("no-base");
+          return;
+        }
+        const addr      = address as `0x${string}`;
+        const baseExists = await hasBase(addr);
+        if (!baseExists) { setGameState("no-base"); return; }
+
+        const [base, targets, events] = await Promise.all([
+          getBaseState(addr),
+          getAttackableTargets(),
+          getRecentEvents(),
+        ]);
+        setWalls(base.walls);
+        setWater(base.water);
+        setFood(base.food);
+        setStreak(base.streak);
+        setLastActionTimestamp(base.lastAction);
+        setRaidTargets(targets.map(t => ({ address: t.address, walls: t.walls })));
+        setLog(events);
+        setGameState("playing");
+      } else {
+        // Stellar
+        if (!GOG_CONTRACT_STELLAR) {
+          setChainError("Stellar contract not deployed. Set NEXT_PUBLIC_GOG_CONTRACT_STELLAR in .env.local");
+          setGameState("no-base");
+          return;
+        }
+        const baseExists = await stellarHasBase(address);
+        if (!baseExists) { setGameState("no-base"); return; }
+
+        const [base, targets] = await Promise.all([
+          getStellarBaseState(address),
+          getStellarAttackableTargets(address),
+        ]);
+        setWalls(base.walls);
+        setWater(base.water);
+        setFood(base.food);
+        setStreak(base.streak);
+        setLastActionTimestamp(null); // Stellar uses ledger numbers
+        setRaidTargets(targets.map(t => ({ address: t.address, walls: t.walls })));
+        setLog([]);
+        setGameState("playing");
+      }
+    } catch (err: any) {
+      console.error("refreshState:", err);
+      setChainError(err?.message?.slice(0, 120) ?? "Failed to load chain state");
+      setGameState("no-base");
+    }
   }, [address, chain]);
+
+  useEffect(() => { refreshState(); }, [refreshState]);
 
   // ── Milestone detection ─────────────────────────────────────
   useEffect(() => {
@@ -453,12 +511,9 @@ export default function GamePage() {
   // ── Push notification permission ────────────────────────────
   useEffect(() => {
     if (!address || typeof window === "undefined" || !("Notification" in window)) return;
-    if (Notification.permission === "default") {
-      Notification.requestPermission();
-    }
+    if (Notification.permission === "default") Notification.requestPermission();
   }, [address]);
 
-  // Called by DecayTimer when 1hr mark is crossed
   const handleDecayWarning = useCallback(() => {
     toast("warning", "Decay in 1 hour!", "Sign your daily transaction now to keep your streak alive.");
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
@@ -468,99 +523,100 @@ export default function GamePage() {
     }
   }, [toast]);
 
+  // ── Initialize base ─────────────────────────────────────────
+  const handleInitBase = useCallback(async () => {
+    if (!address) return;
+    setInitPending(true);
+    try {
+      if (chain === "celo") await contractInitBase();
+      else await initBaseSoroban(address);
+      toast("success", "Base initialized!", "Your citadel is now live on-chain.");
+      await refreshState();
+    } catch (err: any) {
+      const msg = err?.message?.includes("rejected") ? "Transaction rejected." : err?.message?.slice(0, 80) ?? "Failed.";
+      toast("error", "Init failed", msg);
+    }
+    setInitPending(false);
+  }, [address, chain, refreshState, toast]);
+
   // ── Keyboard shortcuts ──────────────────────────────────────
   useEffect(() => {
-    const map: Record<string, Action> = { t: "tend", s: "scavenge", r: "reinforce", a: "raid" };
+    const map: Record<string, Action> = { t:"tend", s:"scavenge", r:"reinforce", a:"raid" };
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (pending) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || pending || gameState !== "playing") return;
       const action = map[e.key.toLowerCase()];
       if (action) act(action);
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending]);
+  }, [pending, gameState]);
 
   // ── Core action handler ─────────────────────────────────────
   const act = useCallback(async (action: Action) => {
-    if (pending) return;
+    if (pending || !address || gameState !== "playing") return;
     if (action === "raid") { setShowRaid(true); return; }
 
     setPending(action);
     setLastAction(action);
 
-    const isReal = IS_CONTRACT_DEPLOYED && !!address && chain === "celo";
+    const ACTION_MSGS: Record<string, string> = {
+      tend:      "Base tended · all resources +15% · streak +1",
+      scavenge:  "Scavenged · Food +22% · Water +12%",
+      reinforce: "Walls reinforced +30%",
+    };
 
     try {
-      if (isReal) {
-        // Real contract call
+      if (chain === "celo") {
         if (action === "tend")      await contractTend();
         if (action === "scavenge")  await contractScavenge();
         if (action === "reinforce") await contractReinforce();
-        // Refresh from chain
-        const s = await getBaseState(address as `0x${string}`);
-        setWalls(s.walls); setWater(s.water); setFood(s.food); setStreak(s.streak);
       } else {
-        // Demo simulation
-        await new Promise(r => setTimeout(r, 1100));
-        if (action === "tend") {
-          setWalls(v => Math.min(100, v + 15));
-          setWater(v => Math.min(100, v + 15));
-          setFood(v  => Math.min(100, v + 15));
-          setStreak(v => v + 1);
-          setXp(v => v + 50);
-        } else if (action === "scavenge") {
-          setFood(v  => Math.min(100, v + 22));
-          setWater(v => Math.min(100, v + 12));
-          setXp(v => v + 20);
-        } else if (action === "reinforce") {
-          setWalls(v => Math.min(100, v + 30));
-          setXp(v => v + 30);
-        }
+        if (action === "tend")      await tendBaseSoroban(address);
+        if (action === "scavenge")  await scavengeSoroban(address);
+        if (action === "reinforce") await reinforceWallsSoroban(address);
       }
 
-      // Toast + log
-      const msgs: Record<string, [string, string]> = {
-        tend:      [`Base tended · Streak ${streak + 1} · +50 XP`, "success"],
-        scavenge:  ["Scavenged · Food +22% · Water +12% · +20 XP",  "success"],
-        reinforce: ["Walls reinforced +30% · +30 XP",               "success"],
-      };
-      const [msg, type] = msgs[action] ?? ["Action complete", "success"];
-      toast("success", msg);
-      addLog(type, msg);
+      await refreshState();
+      setXp(v => v + (action === "tend" ? 50 : action === "scavenge" ? 20 : 30));
+      toast("success", ACTION_MSGS[action]);
+      addLog("success", ACTION_MSGS[action]);
 
-      // Critical resource warnings
       if (walls < 30 && action !== "reinforce")
         toast("warning", "Walls critical", "Reinforce or hire an agent before raiders attack.");
 
     } catch (err: any) {
-      const msg = err?.message?.includes("rejected") ? "Transaction rejected by wallet." : "Transaction failed. Try again.";
+      const msg = err?.message?.includes("rejected")
+        ? "Transaction rejected by wallet."
+        : err?.message?.slice(0, 80) ?? "Transaction failed.";
       toast("error", "Action failed", msg);
     }
 
     setTimeout(() => setLastAction(""), 1200);
     setPending(null);
-  }, [pending, address, chain, streak, walls, toast, addLog]);
+  }, [pending, address, chain, gameState, walls, refreshState, toast, addLog]);
 
   // ── Raid execution ──────────────────────────────────────────
-  const handleRaid = useCallback(async (target: typeof RAID_TARGETS[0]) => {
+  const handleRaid = useCallback(async (target: RaidTarget) => {
+    if (!address) return;
     try {
-      if (IS_CONTRACT_DEPLOYED && address && chain === "celo") {
-        await attackBase(target.addr);
+      if (chain === "celo") {
+        await attackBase(target.address as `0x${string}`);
       } else {
-        await new Promise(r => setTimeout(r, 1400));
-        setWalls(v => Math.max(0, v - 3)); // You take 3 wall damage
+        await attackBaseSoroban(address, target.address);
       }
-      toast("success", `Raid successful — +${target.reward} resources`, `${target.name}'s walls took ${Math.min(5 + streak, 25)} damage`);
-      addLog("neutral", `Raid on ${target.name} succeeded · +${target.reward} resources · You took −3 walls`);
+      await refreshState();
       setXp(v => v + 40);
-    } catch {
-      toast("error", "Raid failed", "The target defended successfully.");
+      const shortAddr = `${target.address.slice(0, 6)}…${target.address.slice(-4)}`;
+      toast("success", "Raid executed", `${shortAddr} took ${Math.min(5 + streak, 25)} wall damage`);
+      addLog("danger", `Raid on ${shortAddr} executed · You took −3 walls`);
+    } catch (err: any) {
+      const msg = err?.message?.includes("rejected") ? "Transaction rejected." : "The target defended successfully.";
+      toast("error", "Raid failed", msg);
     }
     setShowRaid(false);
-  }, [address, chain, streak, toast, addLog]);
+  }, [address, chain, streak, refreshState, toast, addLog]);
 
   const level     = Math.floor(xp / 100) + 1;
   const xpInLevel = xp % 100;
@@ -569,31 +625,28 @@ export default function GamePage() {
     action: Action; label: string; sub: string; icon: any;
     colorHex: string; isPrimary?: boolean; kbd: string;
   }[] = [
-    { action:"tend",      label:"Tend Base",       sub:"Restore all +15% · +1 streak · +50 XP", icon:Shield, colorHex:"#FF3333", isPrimary:true, kbd:"T" },
-    { action:"scavenge",  label:"Scavenge",         sub:"Food +22%, Water +12% · +20 XP",         icon:Wheat,  colorHex:"#00CC66",                kbd:"S" },
-    { action:"reinforce", label:"Reinforce Walls",  sub:"Walls +30% · +30 XP",                    icon:Shield, colorHex:"#3399FF",                kbd:"R" },
-    { action:"raid",      label:"Raid Neighbor",    sub:"Attack weakened citadels for resources", icon:Swords, colorHex:"#FF3333",                kbd:"A" },
+    { action:"tend",      label:"Tend Base",      sub:"Restore all +15% · +1 streak · +50 XP", icon:Shield, colorHex:"#FF3333", isPrimary:true, kbd:"T" },
+    { action:"scavenge",  label:"Scavenge",        sub:"Food +22%, Water +12% · +20 XP",         icon:Wheat,  colorHex:"#00CC66",                kbd:"S" },
+    { action:"reinforce", label:"Reinforce Walls", sub:"Walls +30% · +30 XP",                    icon:Shield, colorHex:"#3399FF",                kbd:"R" },
+    { action:"raid",      label:"Raid Neighbor",   sub:"Attack weakened citadels for resources", icon:Swords, colorHex:"#FF3333",                kbd:"A" },
   ];
+
+  const isDisabled = !!pending || gameState !== "playing";
 
   return (
     <div className="min-h-screen">
       <WalletBar />
 
-      {/* Confetti */}
       <Confetti active={confetti} />
 
-      {/* Milestone celebration */}
       {celebration && (
-        <MilestoneCelebration
-          milestone={celebration}
-          onClose={() => setCelebration(null)}
-        />
+        <MilestoneCelebration milestone={celebration} onClose={() => setCelebration(null)} />
       )}
 
-      {/* Raid panel */}
       {showRaid && (
         <RaidPanel
           streak={streak}
+          targets={raidTargets}
           pending={!!pending}
           onClose={() => setShowRaid(false)}
           onRaid={handleRaid}
@@ -602,29 +655,24 @@ export default function GamePage() {
 
       {/* Scene */}
       <div className="pt-14">
-        <GameScene
-          wallHealth={walls}
-          waterLevel={water}
-          foodLevel={food}
-          lastAction={lastAction}
-        />
+        <GameScene wallHealth={walls} waterLevel={water} foodLevel={food} lastAction={lastAction} />
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
 
-        {/* ── Connect wallet banner ───────────────────────────── */}
-        {!address && (
+        {/* ── Disconnected banner ─────────────────────────────── */}
+        {gameState === "disconnected" && (
           <div
             className="card p-5 mb-6 flex items-center gap-4"
-            style={{ borderColor: "rgba(255,184,0,0.2)", background: "linear-gradient(135deg, rgba(255,184,0,0.04), var(--surface))" }}
+            style={{ borderColor:"rgba(255,184,0,0.2)", background:"linear-gradient(135deg, rgba(255,184,0,0.04), var(--surface))" }}
           >
             <div className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center"
-              style={{ background: "rgba(255,184,0,0.12)", border: "1px solid rgba(255,184,0,0.3)" }}>
-              <Wallet className="w-5 h-5" style={{ color: "var(--gold)" }} />
+              style={{ background:"rgba(255,184,0,0.12)", border:"1px solid rgba(255,184,0,0.3)" }}>
+              <Wallet className="w-5 h-5" style={{ color:"var(--gold)" }} />
             </div>
             <div className="flex-1">
-              <div className="font-semibold text-white text-sm mb-0.5">Playing in demo mode</div>
-              <div className="text-xs text-white/40">Connect your wallet to save progress onchain and earn real NFT rewards.</div>
+              <div className="font-semibold text-white text-sm mb-0.5">Connect your wallet to play</div>
+              <div className="text-xs text-white/40">Your progress is stored on-chain. Connect to load your citadel.</div>
             </div>
             <div className="flex gap-2 flex-shrink-0">
               <button onClick={connectCelo} className="btn btn-secondary text-xs py-1.5 px-3"
@@ -636,6 +684,46 @@ export default function GamePage() {
                 Stellar
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── Loading banner ──────────────────────────────────── */}
+        {gameState === "loading" && (
+          <div className="card p-5 mb-6 flex items-center gap-3" style={{ borderColor:"rgba(255,255,255,0.08)" }}>
+            <Loader2 className="w-5 h-5 animate-spin text-white/40 flex-shrink-0" />
+            <span className="text-sm text-white/50">Loading your citadel from chain…</span>
+          </div>
+        )}
+
+        {/* ── No-base / error banner ──────────────────────────── */}
+        {gameState === "no-base" && address && (
+          <div
+            className="card p-6 mb-6 text-center"
+            style={{ borderColor:"rgba(255,184,0,0.3)", background:"linear-gradient(135deg, rgba(255,184,0,0.06), var(--surface))" }}
+          >
+            {chainError ? (
+              <>
+                <p className="text-sm text-red-400 font-mono mb-2">{chainError}</p>
+                <p className="text-xs text-white/30">Configure contract addresses in .env.local to start playing</p>
+              </>
+            ) : (
+              <>
+                <div className="text-4xl mb-3">🏗️</div>
+                <h3 className="font-display font-700 text-xl text-white mb-2">No citadel found</h3>
+                <p className="text-sm text-white/40 mb-5">Your wallet has no base on this chain. Initialize one to start playing.</p>
+                <button
+                  onClick={handleInitBase}
+                  disabled={initPending}
+                  className="btn btn-primary px-8 py-3 mx-auto"
+                >
+                  {initPending ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Initializing…
+                    </span>
+                  ) : "Initialize Base"}
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -652,8 +740,8 @@ export default function GamePage() {
                   {level}
                 </div>
                 <div>
-                  <div className="font-semibold text-white text-sm">
-                    {address ? `${address.slice(0,6)}…${address.slice(-4)}` : "vitalik.eth"}
+                  <div className="font-semibold text-white text-sm font-mono">
+                    {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "—"}
                   </div>
                   <div className="text-xs text-white/35 font-mono">Level {level} Citadel Lord · {chain}</div>
                 </div>
@@ -707,9 +795,9 @@ export default function GamePage() {
                       style={{
                         left:        `${(m.days/100)*100}%`,
                         transform:   "translate(-50%,-50%)",
-                        background:  streak>=m.days ? "var(--gold)" : "var(--surface2)",
-                        borderColor: streak>=m.days ? "var(--gold)" : "rgba(255,255,255,0.12)",
-                        boxShadow:   streak>=m.days ? "0 0 8px rgba(255,184,0,0.6)" : "none",
+                        background:  streak >= m.days ? "var(--gold)" : "var(--surface2)",
+                        borderColor: streak >= m.days ? "var(--gold)" : "rgba(255,255,255,0.12)",
+                        boxShadow:   streak >= m.days ? "0 0 8px rgba(255,184,0,0.6)" : "none",
                       }} />
                   ))}
                 </div>
@@ -739,13 +827,13 @@ export default function GamePage() {
                     <button
                       key={action}
                       onClick={() => act(action)}
-                      disabled={!!pending}
+                      disabled={isDisabled}
                       className={clsx(
                         "card p-4 text-left transition-all duration-200 relative overflow-hidden group",
                         "hover:border-white/15 disabled:opacity-40 disabled:cursor-not-allowed",
                         isPrimary && "ring-1",
                       )}
-                      style={isPrimary ? { ringColor:`${colorHex}40`, borderColor:`${colorHex}30` } : {}}
+                      style={isPrimary ? { borderColor:`${colorHex}30`, outline:`1px solid ${colorHex}40` } : {}}
                     >
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
                         style={{ background:`radial-gradient(ellipse at 50% 100%, ${colorHex}0e 0%, transparent 70%)` }} />
@@ -774,7 +862,6 @@ export default function GamePage() {
                 })}
               </div>
 
-              {/* Keyboard shortcut legend */}
               <div className="mt-2 flex items-center gap-1.5 text-xs text-white/20 font-mono">
                 <span>Shortcuts:</span>
                 {ACTIONS.map(a => (
@@ -789,7 +876,7 @@ export default function GamePage() {
 
           {/* ── RIGHT COL ────────────────────────────────────── */}
           <div className="space-y-5">
-            <DecayTimer onNotify={handleDecayWarning} />
+            <DecayTimer lastActionTimestamp={lastActionTimestamp} onNotify={handleDecayWarning} />
 
             {/* Agent CTA */}
             <div className="card p-4 relative overflow-hidden" style={{ borderColor:"rgba(51,153,255,0.2)" }}>
@@ -803,9 +890,10 @@ export default function GamePage() {
                 <div className="flex-1">
                   <div className="font-semibold text-sm text-white mb-1">No agent active</div>
                   <div className="text-xs text-white/35 mb-3 leading-relaxed">
-                    Miss a day and your streak resets. An agent signs for you while you're offline.
+                    Miss a day and your streak resets. An agent signs for you while you&apos;re offline.
                   </div>
-                  <a href="/agents" className="flex items-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg transition-all w-full justify-center"
+                  <a href="/agents"
+                    className="flex items-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg transition-all w-full justify-center"
                     style={{ color:"var(--blue)", background:"rgba(51,153,255,0.08)", border:"1px solid rgba(51,153,255,0.25)" }}>
                     Hire an agent <ChevronRight className="w-3 h-3" />
                   </a>
@@ -817,37 +905,44 @@ export default function GamePage() {
             <div>
               <div className="text-xs font-mono text-white/25 tracking-widest uppercase mb-3">Chain log</div>
               <div className="space-y-1.5">
-                {log.map((entry, i) => <LogEntry key={i} {...entry} />)}
+                {log.length === 0 && (
+                  <div className="text-xs text-white/20 font-mono text-center py-4">
+                    {gameState === "playing" ? "No recent activity" : "Connect wallet to see events"}
+                  </div>
+                )}
+                {log.map((entry, i) => <LogItem key={i} type={entry.type} text={entry.text} />)}
               </div>
             </div>
 
-            {/* Threats */}
+            {/* Raidable targets nearby */}
             <div>
               <div className="text-xs font-mono text-white/25 tracking-widest uppercase mb-3">Threats nearby</div>
               <div className="space-y-2">
-                {RAID_TARGETS.map(t => (
-                  <div key={t.name} className="card p-3"
-                    style={{ borderColor:t.walls<20?"rgba(255,51,51,0.2)":"rgba(255,255,255,0.07)" }}>
+                {raidTargets.length === 0 && (
+                  <div className="text-xs text-white/20 font-mono text-center py-4">
+                    {gameState === "playing" ? "No weakened citadels nearby" : "Connect wallet to see targets"}
+                  </div>
+                )}
+                {raidTargets.map((t, i) => (
+                  <div key={i} className="card p-3"
+                    style={{ borderColor:t.walls < 20 ? "rgba(255,51,51,0.2)" : "rgba(255,255,255,0.07)" }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full"
-                          style={{ background:t.walls<20?"var(--red)":"var(--gold)", boxShadow:`0 0 5px ${t.walls<20?"var(--red)":"var(--gold)"}` }} />
-                        <span className="text-sm font-medium text-white">{t.name}</span>
+                          style={{ background:t.walls < 20 ? "var(--red)" : "var(--gold)", boxShadow:`0 0 5px ${t.walls < 20 ? "var(--red)" : "var(--gold)"}` }} />
+                        <span className="text-xs font-mono text-white/60">{t.address.slice(0, 8)}…{t.address.slice(-4)}</span>
                       </div>
                       <button
                         onClick={() => setShowRaid(true)}
-                        className="text-xs font-mono px-2 py-0.5 rounded transition-all hover:opacity-80"
+                        disabled={gameState !== "playing"}
+                        className="text-xs font-mono px-2 py-0.5 rounded transition-all hover:opacity-80 disabled:opacity-30"
                         style={{ color:"var(--red)", background:"rgba(255,51,51,0.1)", border:"1px solid rgba(255,51,51,0.2)" }}
                       >
                         Raid →
                       </button>
                     </div>
                     <div className="bar-track">
-                      <div className="bar-fill" style={{
-                        width:`${t.walls}%`,
-                        background:"linear-gradient(90deg,#FF3333,#FF5544)",
-                        boxShadow:"0 0 6px rgba(255,51,51,0.5)",
-                      }} />
+                      <div className="bar-fill" style={{ width:`${t.walls}%`, background:"linear-gradient(90deg,#FF3333,#FF5544)", boxShadow:"0 0 6px rgba(255,51,51,0.5)" }} />
                     </div>
                   </div>
                 ))}
