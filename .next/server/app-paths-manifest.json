@@ -1,8 +1,0 @@
-{
-  "/leaderboard/page": "app/leaderboard/page.js",
-  "/market/page": "app/market/page.js",
-  "/agents/page": "app/agents/page.js",
-  "/game/page": "app/game/page.js",
-  "/page": "app/page.js",
-  "/how-to-play/page": "app/how-to-play/page.js"
-}
